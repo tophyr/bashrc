@@ -1,0 +1,4 @@
+[submodule "configs/default"]
+	path = configs/default
+	url = https://github.com/tophyr/bash-configs
+	branch = default

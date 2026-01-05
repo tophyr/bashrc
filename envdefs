@@ -1,0 +1,79 @@
+#!/bin/bash
+
+function require_var() {
+    if [ -z ${@+x} ]; then
+        exit 64
+    fi
+}
+function ignore_this_var() {
+    exit 65
+}
+export -f require_var
+export -f ignore_this_var
+
+vars=()
+
+function add_var() {
+    vars+=($(basename "$1"))
+}
+settings_iter env process_settingsdir add_var 2>/dev/null
+
+function slurp_static() {
+    eval "$1='$(cat "$2")'"
+    slurp_ret=0
+}
+function slurp_dynamic() {
+    local value
+    value="$("$2")"
+    slurp_ret=$?
+    if [ $slurp_ret -eq 0 ]; then
+        eval "$1='$value'"
+    fi
+}
+function slurp_var() {
+    local var=$2
+    local varfile="$1"/$var
+    if [ -f "$varfile" ]; then
+        if [ -x "$varfile" ]; then
+            slurp_dynamic $var "$varfile"
+        else
+            slurp_static $var "$varfile"
+        fi
+    fi
+}
+
+prev_ifs=$IFS; IFS=$'\n'; vars=($(sort <<<"${vars[*]}" | uniq)); IFS=$prev_ifs
+
+while [ ${#vars[@]} -gt 0 ]; do
+    newvars=()
+
+    for var in ${vars[@]}; do
+        settings_iter env slurp_var $var
+        if [ $slurp_ret -eq 0 ]; then
+            export $var
+        elif [ $slurp_ret -eq 64 ]; then
+            newvars+=("$var")
+        elif [ $slurp_ret -ne 65 ]; then
+            echo ERR: Failure while slurping $var | tee >(cat >&2)
+            return 1
+        fi
+    done
+
+    prev_ifs=$IFS; IFS=$'\n'; newvars=($(sort <<<"${newvars[*]}" | uniq)); IFS=$prev_ifs
+
+    if [ "${vars[*]}" == "${newvars[*]}" ]; then
+        echo ERR: Unrecoverable env var loop. Remaining todo: | tee >(cat >&2)
+        echo ${newvars[*]} | tee >(cat >&2)
+        return 1
+    fi
+    vars=("${newvars[@]}")
+done
+
+unset require_var
+unset ignore_this_var
+unset vars
+unset slurp_static
+unset slurp_dynamic
+unset slurp_var
+unset var
+unset newvars
